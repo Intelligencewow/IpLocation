@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Ip Location</string>
+    <string name="Wifi">Conectado no wifi</string>
+    <string name="Dados_moveis">Conectado nos dados móveis</string>
+    <string name="Sem_conexão">Desconectado</string>
+</resources>
