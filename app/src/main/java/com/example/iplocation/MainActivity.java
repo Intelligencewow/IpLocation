@@ -1,20 +1,21 @@
 package com.example.iplocation;
 
 import android.content.Context;
+
 import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
+
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -23,7 +24,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.MapView;
-import com.google.android.gms.maps.OnMapReadyCallback;
+
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.material.textfield.TextInputEditText;
@@ -40,14 +41,14 @@ import retrofit2.converter.gson.GsonConverterFactory;
 public class MainActivity extends AppCompatActivity implements NetworkStateListener {
     private MapView mapView;
     private GoogleMap googleMap;
-    private NetworkHandler networkHandler;
-    private TextView internetState;
-    private ImageView internetStateIcon;
     private static final String BASE_URL = "http://ip-api.com/";
-    private IpApiResponse ipApiResponse;
-    private TextView country, region, city, isp;
+    private IpInformation ipInformation;
+    private TextView country;
+    private TextView region;
+    private TextView city;
+    private TextView isp;
     private TextInputEditText ip;
-    String ipToQuery;
+    private ApiService apiService;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,45 +66,39 @@ public class MainActivity extends AppCompatActivity implements NetworkStateListe
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
 
-        ApiService apiService = retrofit.create(ApiService.class);
+        apiService = retrofit.create(ApiService.class);
 
-        getIpInfo(apiService, ipToQuery);
 
         mapView = findViewById(R.id.mapView);
-        country = findViewById(R.id.Country);
-        region = findViewById(R.id.Region);
-        city = findViewById(R.id.City);
-        isp = findViewById(R.id.Isp);
+        country = findViewById(R.id.CountryText);
+        region = findViewById(R.id.RegionText);
+        city = findViewById(R.id.CityText);
+        isp = findViewById(R.id.IspText);
         ip = findViewById(R.id.TextInputIP);
         TextInputLayout textInputLayout = findViewById(R.id.textInputLayout);
 
 
         ip.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) {
-
-                ipToQuery =  ip.getText().toString();
+                makeRequestToGetIpInfo();
+                hideKeyboad(v);
                 return true;
             }
             return false;
         });
-        textInputLayout.setEndIconOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                LatLng teste = new LatLng(28.385,-81.563);
-                updateMapLocation(teste);
-                hideKeyboad(v);
-            }
+        textInputLayout.setEndIconOnClickListener(v -> {
+            makeRequestToGetIpInfo();
+            hideKeyboad(v);
         });
 
         mapView.onCreate(savedInstanceState);
 
-        mapView.getMapAsync(new OnMapReadyCallback() {
-            @Override
-            public void onMapReady(@NonNull GoogleMap map) {
-                //googleMap = map;
-                //LatLng location = new LatLng(ipApiResponse.getLat(), ipApiResponse.getLon());
-                //googleMap.addMarker(new MarkerOptions().position(location).title("Marker in Sydney"));
-                //googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location,15));
+        mapView.getMapAsync(map -> {
+            googleMap = map;
+            if (ipInformation != null) {
+                LatLng location = new LatLng(ipInformation.getLat(), ipInformation.getLon());
+                googleMap.addMarker(new MarkerOptions().position(location));
+                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15));
             }
         });
     }
@@ -111,7 +106,7 @@ public class MainActivity extends AppCompatActivity implements NetworkStateListe
     @Override
     protected void onResume() {
         super.onResume();
-        networkHandler = new NetworkHandler(this);
+        NetworkHandler networkHandler = new NetworkHandler(this);
         IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
         registerReceiver(networkHandler, filter);
         mapView.onResume();
@@ -120,10 +115,10 @@ public class MainActivity extends AppCompatActivity implements NetworkStateListe
 
     @Override
     public void onNetworkStateChanged(String networkType) {
-        internetState = findViewById(R.id.InternetState);
-        internetStateIcon = findViewById(R.id.internetStateImage);
+        TextView internetState = findViewById(R.id.InternetState);
+        ImageView internetStateIcon = findViewById(R.id.internetStateImage);
 
-        if (networkType.equals("Wifi")){
+        if (networkType.equals("Wifi")) {
             internetState.setText(R.string.Wifi);
             internetStateIcon.setImageResource(R.drawable.wifi_24dp_000000_fill0_wght400_grad0_opsz24);
 
@@ -139,20 +134,33 @@ public class MainActivity extends AppCompatActivity implements NetworkStateListe
 
     }
 
-    private void getIpInfo(ApiService apiService, String ip){
-        Call<IpApiResponse> call = apiService.getIpInfo(ip);
+    private void getIpInfo(ApiService apiService, String ip) {
+        Call<IpInformation> call = apiService.getIpInfo(ip);
 
-        call.enqueue(new Callback<IpApiResponse>() {
+        call.enqueue(new Callback<IpInformation>() {
             @Override
-            public void onResponse(Call<IpApiResponse> call, Response<IpApiResponse> response) {
-                if (response.isSuccessful()){
-                    ipApiResponse = response.body();
-                    setInfoOnActivity();
+            public void onResponse( Call<IpInformation> call, Response<IpInformation> response) {
+                if (response.isSuccessful()) {
 
-                    Log.d("MainActivity", "lat: " + ipApiResponse.getCountry());
-                }  else {
+                    Log.i("MainActivity", "onResponse:" + response.body().toString());
+                    ipInformation = response.body();
+
+                    if (ipInformation.getStatus().equals("success")) {
+                        updateMapLocation();
+                        setInfoOnActivity();
+                    } else {
+
+                        Log.i("MainActivity", "FALHOU");
+                        AlertDialog dialog = createAlertDialog();
+                        dialog.show();
+
+                    }
+                    Log.d("MainActivity", "lat: " + ipInformation.getCountry());
+                    Log.d("MainActivity", "Query: " + ipInformation.getQuery());
+                    Log.d("MainActivity", "Status: " + ipInformation.getStatus());
+                    Log.d("MainActivity", "response Code: " + response.code());
+                } else {
                     Log.e("MainActivity", "Erro na resposta da API. Código: " + response.code());
-                    Log.e("MainActivity", "Mensagem: " + response.message());
                     try {
                         String errorBody = response.errorBody().string(); // Captura o corpo da resposta de erro
                         Log.e("MainActivity", "Corpo de erro: " + errorBody);
@@ -163,28 +171,47 @@ public class MainActivity extends AppCompatActivity implements NetworkStateListe
             }
 
             @Override
-            public void onFailure(Call<IpApiResponse> call, Throwable t) {
+            public void onFailure(Call<IpInformation> call, Throwable t) {
                 Log.e("MainActivity", "Falha na chamada da API: " + t.getMessage());
             }
         });
     }
 
-    private void setInfoOnActivity(){
-        country.setText(ipApiResponse.getCountry());
-        region.setText(ipApiResponse.getRegionName());
-        city.setText(ipApiResponse.getCity());
-        isp.setText(ipApiResponse.getIsp());
+    private void setInfoOnActivity() {
+        country.setText(ipInformation.getCountry());
+        region.setText(ipInformation.getRegionName());
+        city.setText(ipInformation.getCity());
+        isp.setText(ipInformation.getIsp());
     }
 
-    private  void updateMapLocation(LatLng newLocation){
-        googleMap.addMarker(new MarkerOptions().position(newLocation));
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15));
+    private void updateMapLocation() {
+        LatLng newLocation = new LatLng(ipInformation.getLat(), ipInformation.getLon());
+        if (googleMap != null) {
+            googleMap.addMarker(new MarkerOptions().position(newLocation));
+            googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(newLocation, 15));
+        }
     }
+
 
     public void hideKeyboad(View view) {
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null){
+        if (imm != null) {
             imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
         }
+    }
+
+    public AlertDialog createAlertDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Endereço ip inválido")
+                .setMessage("Você digitou um endereço de ip inválido");
+        builder.setPositiveButton("OK", (dialog, which) -> dialog.dismiss());
+
+        return builder.create();
+    }
+
+    public void makeRequestToGetIpInfo() {
+        String ipToQuery = ip.getText().toString();
+        Log.i("Ip", "makeRequestToGetIpInfo: " + ipToQuery);
+        getIpInfo(apiService, ipToQuery);
     }
 }
